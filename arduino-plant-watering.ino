@@ -111,11 +111,24 @@ void renderHome() {
   humidity.concat("%");
   String temperature = String(humTemp[1]);
   temperature.concat("C");
-  display.setCursor(0,10);
+  display.setCursor(0,13);
   display.write(humidity.c_str());
 
-  display.setCursor(0,20);
+  display.setCursor(0,23);
   display.write(temperature.c_str());
+
+  display.drawRoundRect(42, 10, 42, 25, 4, BLACK);
+
+  bool willRunToday = (configuration.frequency & (1 << (6 - (weekday() - 1)))) > 0;
+  
+  if (willRunToday) {
+    sprintf(line, "%02d:%02d\n", configuration.hourOfDay, 00);
+  } else {
+    sprintf(line, "  %c  ", 1);
+  }
+  display.setCursor(48, 19);
+  display.write(line);
+  
 
   renderWeekdays(2, 40, weekday() - 1);
 
@@ -128,12 +141,13 @@ void renderHome() {
 void renderWeekdays(int x, int y, int today) {
   for (int i = 0; i < 7; i++) {
     bool isOn = (configuration.frequency & (1 << (6 - i))) > 0;
-    display.fillRoundRect(x + i * 12, y, 7, 7, 1, BLACK);
-    if (!isOn) {
-      display.fillRoundRect(x + 1 + i * 12, y + 1, 5, 5, 1, WHITE);
+    if (isOn) {
+      display.fillRoundRect(x + i * 12, y, 7, 7, 1, BLACK);
+    } else {
+      display.drawRoundRect(x + i * 12, y, 7, 7, 1, BLACK);
     }
     if (today == i) {
-      display.drawPixel(x + 3 + i * 12, y - 3, BLACK);
+      display.drawRoundRect(x + i * 12 +2, y + 2, 3, 3, 1, isOn ? WHITE : BLACK);
     }
   }
 }
