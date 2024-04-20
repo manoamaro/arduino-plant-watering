@@ -1,7 +1,5 @@
 #include "configuration.h"
 
-
-
 int clamp(int amt, int low, int high) {
   return ((amt) < (low) ? (low) : ((amt) > (high) ? (high) : (amt)));
 }
@@ -48,46 +46,6 @@ void saveEEPROM(Pump* pumps, uint8_t pumpsCount, SensorConfig sensorConfig)
   mem.sensorConfig = sensorConfig;
 
   EEPROM.updateBlock(0, mem);
-}
-
-void incFrequency(Pump *pump, bool up)
-{
-  PumpConfig config = pump->getConfig();
-  uint8_t value = config.frequency + (up ? STEPS_FREQUENCY : -STEPS_FREQUENCY);
-  config.frequency = constrain(value, MIN_FREQUENCY, MAX_FREQUENCY);
-  pump->setConfig(config);
-}
-
-void incSecondsPump(Pump *pump, bool up)
-{
-  PumpConfig config = pump->getConfig();
-  uint8_t value = config.secondsPump + (up ? STEPS_SECONDS_PUMP : -STEPS_SECONDS_PUMP);
-  config.secondsPump = constrain(value, MIN_SECONDS_PUMP, MAX_SECONDS_PUMP);
-  pump->setConfig(config);
-}
-
-void incPumpPower(Pump *pump, bool up)
-{
-  PumpConfig config = pump->getConfig();
-  uint8_t value = config.power + (up ? STEPS_PUMP_POWER : -STEPS_PUMP_POWER);
-  config.power = constrain(value, MIN_PUMP_POWER, MAX_PUMP_POWER);
-  pump->setConfig(config);
-}
-
-void incSoilSensor(Pump *pump, bool up)
-{
-  PumpConfig config = pump->getConfig();
-  uint8_t value = config.soilSensor + (up ? STEPS_SOIL_SENSOR : -STEPS_SOIL_SENSOR);
-  config.soilSensor = constrain(value, MIN_SOIL_SENSOR, MAX_SOIL_SENSOR);
-  pump->setConfig(config);
-}
-
-void incLightSensor(Pump *pump, bool up)
-{
-  PumpConfig config = pump->getConfig();
-  uint8_t value = config.lightSensor + (up ? STEPS_LIGHT_SENSOR : -STEPS_LIGHT_SENSOR);
-  config.lightSensor = constrain(value, MIN_LIGHT_SENSOR, MAX_LIGHT_SENSOR);
-  pump->setConfig(config);
 }
 
 int filterNoise(int lastMeasure, int newMeasure)

@@ -3,6 +3,12 @@
 
 #include <Arduino.h>
 
+#define MIN_SOIL_SENSOR_CALIBRATION 0
+#define MAX_SOIL_SENSOR_CALIBRATION 1023
+
+#define MIN_LIGHT_SENSOR_CALIBRATION 0
+#define MAX_LIGHT_SENSOR_CALIBRATION 1023
+
 struct SensorConfig
 {
     int lightSensorDayValue;

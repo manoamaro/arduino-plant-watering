@@ -13,17 +13,12 @@
 #define SLEEP
 #define WD
 
-// clear bit
-// set bit
-#define cbi(by, bi) (by &= ~(1 << bi))
-#define sbi(by, bi) (by |= (1 << bi))
-
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
 #define SLEEP_TIME 1000 * 15
 
-#define NUM_PUMPS 1
+#define NUM_PUMPS 3
 
 /**
   TEMPERATURE AND HUMIDITY SENSOR
@@ -81,30 +76,29 @@ enum SettingsState
 AppState appState = HOME;
 SettingsState settingsState = FREQUENCY;
 // Which pump is being setup in the settings
+// Current pump in settings
+uint8_t pumpIdxSettings = 0;
+// Current pump showing info - home screen
+byte pumpIdxHome = 0;
 
 Pump pumps[NUM_PUMPS] = {
-    Pump(),
+    Pump(PUMP_01),
+    Pump(PUMP_02),
+    Pump(PUMP_03),
 };
-
-uint8_t pumpIdxSettings = 0;
-// List of available Pumps
-const uint8_t pumpsPins[NUM_PUMPS] = {PUMP_01};
 // List of Soil sensors
-const uint8_t soilSensorsPins[NUM_PUMPS] = {SOIL_SENSOR_01};
-// Pumps state
-byte pumpsActive = 0b000;
-// Current pump showing info - home screen
-byte pumpInfoIdx = 0;
-// Last time the pump started, in in milliseconds
-uint32_t pumpStartedMs[NUM_PUMPS];
+const uint8_t soilSensorsPins[NUM_PUMPS] = {
+  SOIL_SENSOR_01,
+  SOIL_SENSOR_02,
+  SOIL_SENSOR_03,
+};
 
 boolean sleeping = false;
 
 /**
-  Sensor data
+  Sensor information
 */
 SensorData sensorData;
-
 SensorConfig sensorConfig;
 
 /**
@@ -127,38 +121,35 @@ DHT dht(DHTPIN, DHTTYPE);
 
 char lineBuffer[22];
 
-bool isPumping(uint8_t pumpIdx)
+bool anyPumpIsRunning()
 {
-  return (pumpsActive & _BV(pumpIdx)) > 0;
-}
-
-bool setIsPumping(int pumpIdx, bool value)
-{
-  if (value)
+  for (uint8_t i = 0; i < NUM_PUMPS; i++)
   {
-    pumpsActive |= _BV(pumpIdx);
+    if (pumps[i].isRunning())
+    {
+      return true;
+    }
   }
-  else
-  {
-    pumpsActive &= ~_BV(pumpIdx);
-  }
+  return false;
 }
 
 /**
   Set the state to PUMPING and start the water pump.
   */
-void startPump(uint8_t pump)
+void startPump(uint8_t pumpIdx)
 {
-  pumpStartedMs[pump] = millis();
-  setIsPumping(pump, true);
+  Pump *pump = &pumps[pumpIdx];
+  pump->setStartedAtMs(millis());
+  pump->setRunning(true);
 }
 
 /**
   Set the state to PUMPING and stop the water pump.
   */
-void stopPump(uint8_t pump)
+void stopPump(uint8_t pumpIdx)
 {
-  setIsPumping(pump, false);
+  Pump *pump = &pumps[pumpIdx];
+  pump->setRunning(false);
 }
 
 void startAllPumps()
@@ -173,7 +164,10 @@ void startAllPumps()
 
 void stopAllPumps()
 {
-  pumpsActive = 0b000;
+  for (uint8_t pumpIdx = 0; pumpIdx < NUM_PUMPS; pumpIdx++)
+  {
+    stopPump(pumpIdx);
+  }
 }
 
 void readSensors()
@@ -190,7 +184,6 @@ void readSensors()
 
   for (uint8_t i = 0; i < NUM_PUMPS; i++)
   {
-    Pump *pump = &pumps[i];
     sensorRead = analogRead(soilSensorsPins[i]);
     sensorRead = map(sensorRead, sensorConfig.soilSensorDryValue[i], sensorConfig.soilSensorWetValue[i], 0, 100);
     sensorRead = constrain(sensorRead, 0, 100);
@@ -253,20 +246,22 @@ void footer(const __FlashStringHelper *b1, const __FlashStringHelper *b2, const 
 
 #define BAR_SIZE 32
 
-void body(uint8_t pumpIdx, uint16_t secondsNextPump, uint16_t secondsPump, uint8_t soil, uint8_t minSoil, uint8_t light, uint8_t minLight)
+void body(Pump pump, uint8_t pumpIdx, SensorData sensorData)
 {
+  auto pumpConfig = pump.getConfig();
+
   display.setCursor(0, 24);
   display.setTextSize(3);
   display.print(F("P"));
   display.print(pumpIdx + 1);
 
-  if (isPumping(pumpIdx))
+  if (pump.isRunning())
   {
     display.setCursor(40, 22);
     display.setTextSize(1);
     display.print(F("...RUNNING..."));
-    uint32_t configPumpMs = ((uint32_t)secondsPump) * 1000ul;
-    uint32_t elapsedMs = millis() - pumpStartedMs[pumpIdx];
+    uint32_t configPumpMs = ((uint32_t)pumpConfig.secondsPump) * 1000ul;
+    uint32_t elapsedMs = millis() - pump.getStartedAtMs();
     int secsLeft = int((configPumpMs - elapsedMs) / 1000ul);
     sprintf_P(lineBuffer, PSTR("%03dsecs left"), secsLeft);
     display.setCursor(40, 38);
@@ -282,24 +277,24 @@ void body(uint8_t pumpIdx, uint16_t secondsNextPump, uint16_t secondsPump, uint8
     display.setCursor(40, 22);
     display.write(0x0f);
     display.drawRoundRect(48, 22, BAR_SIZE, 7, 4, WHITE);
-    display.fillRoundRect(48, 22, (BAR_SIZE * light) / 100, 7, 4, WHITE);
-    display.drawFastVLine(48 + (BAR_SIZE * minLight) / 100, 19, 13, WHITE);
+    display.fillRoundRect(48, 22, (BAR_SIZE * sensorData.light) / 100, 7, 4, WHITE);
+    display.drawFastVLine(48 + (BAR_SIZE * pumpConfig.lightSensor) / 100, 19, 13, WHITE);
     // Soil Sensor
     display.setTextSize(1);
     display.setCursor(88, 22);
     display.write(0xef);
     display.drawRoundRect(95, 22, BAR_SIZE, 7, 4, WHITE);
-    display.fillRoundRect(95, 22, (BAR_SIZE * soil) / 100, 7, 4, WHITE);
-    display.drawFastVLine(95 + (BAR_SIZE * minSoil) / 100, 19, 13, WHITE);
+    display.fillRoundRect(95, 22, (BAR_SIZE * sensorData.soilMoisture[pumpIdx]) / 100, 7, 4, WHITE);
+    display.drawFastVLine(95 + (BAR_SIZE * pumpConfig.soilSensor) / 100, 19, 13, WHITE);
 
     display.setTextSize(1);
     display.setCursor(40, 35);
-    sprintf_P(lineBuffer, PSTR("%02dh%02dmin"), secondsNextPump / 60 / 60, (secondsNextPump / 60) % 60);
+    sprintf_P(lineBuffer, PSTR("%02dh%02dmin"), pump.secondsToNextRun(millis()) / 60 / 60, (pump.secondsToNextRun(millis()) / 60) % 60);
     display.print(lineBuffer);
-    sprintf_P(lineBuffer, PSTR("%03dsecs"), secondsPump);
+    sprintf_P(lineBuffer, PSTR("%03dsecs"), pumpConfig.secondsPump);
     display.setCursor(40, 45);
     display.print(lineBuffer);
-    if (soil > minSoil)
+    if (sensorData.soilMoisture[pumpIdx] > pumpConfig.soilSensor)
     {
       display.drawBitmap(95, 37, epd_bitmap_plant_good, 13, 13, WHITE);
     }
@@ -307,7 +302,7 @@ void body(uint8_t pumpIdx, uint16_t secondsNextPump, uint16_t secondsPump, uint8
     {
       display.drawBitmap(95, 37, epd_bitmap_plant_dry, 13, 13, WHITE);
     }
-    if (light > minLight)
+    if (sensorData.light > pumpConfig.lightSensor)
     {
       display.drawBitmap(112, 40, epd_bitmap_sun, 9, 9, WHITE);
     }
@@ -325,9 +320,9 @@ void body(uint8_t pumpIdx, uint16_t secondsNextPump, uint16_t secondsPump, uint8
 */
 void renderHome()
 {
-  Pump *pump = &pumps[pumpInfoIdx];
+  Pump pump = pumps[pumpIdxHome];
   header(sensorData.temperature, sensorData.humidity, sensorData.light);
-  body(pumpInfoIdx, pump->secondsToNextRun(millis()), pump->getConfig().secondsPump, sensorData.soilMoisture[pumpInfoIdx], pump->getConfig().soilSensor, sensorData.light, pump->getConfig().lightSensor);
+  body(pump, pumpIdxHome, sensorData);
 }
 
 /**
@@ -498,19 +493,19 @@ void btn2Press()
     switch (settingsState)
     {
     case FREQUENCY:
-      incFrequency(pump, true);
+      pump->incFrequency(true);
       break;
     case SECONDS_PUMP:
-      incSecondsPump(pump, true);
+      pump->incSecondsPump(true);
       break;
     case PUMP_POWER:
-      incPumpPower(pump, true);
+      pump->incPumpPower(true);
       break;
     case SOIL_SENSOR_SET:
-      incSoilSensor(pump, true);
+      pump->incSoilSensor(true);
       break;
     case LIGHT_SENSOR_SET:
-      incLightSensor(pump, true);
+      pump->incLightSensor(true);
       break;
     case CALIBRATE_SOIL_SENSOR:
       sensorConfig.soilSensorDryValue[pumpIdxSettings] = analogRead(soilSensorsPins[pumpIdxSettings]);
@@ -527,13 +522,13 @@ void btn2Press()
   }
   else if (appState == HOME)
   {
-    if (pumpsActive > 0)
+    if (pumps[pumpIdxHome].isRunning())
     {
-      stopAllPumps();
+      stopPump(pumpIdxHome);
     }
     else
     {
-      startAllPumps();
+      startPump(pumpIdxHome);
     }
   }
   else
@@ -550,19 +545,19 @@ void btn3Press()
     switch (settingsState)
     {
     case FREQUENCY:
-      incFrequency(pump, false);
+      pump->incFrequency(false);
       break;
     case SECONDS_PUMP:
-      incSecondsPump(pump, false);
+      pump->incSecondsPump(false);
       break;
     case PUMP_POWER:
-      incPumpPower(pump, false);
+      pump->incPumpPower(false);
       break;
     case SOIL_SENSOR_SET:
-      incSoilSensor(pump, false);
+      pump->incSoilSensor(false);
       break;
     case LIGHT_SENSOR_SET:
-      incLightSensor(pump, false);
+      pump->incLightSensor(false);
       break;
     case CALIBRATE_SOIL_SENSOR:
       sensorConfig.soilSensorWetValue[pumpIdxSettings] = analogRead(soilSensorsPins[pumpIdxSettings]);
@@ -577,7 +572,7 @@ void btn3Press()
   }
   else if (appState == HOME)
   {
-    pumpInfoIdx = (pumpInfoIdx + 1) % NUM_PUMPS;
+    pumpIdxHome = (pumpIdxHome + 1) % NUM_PUMPS;
   }
 }
 
@@ -589,14 +584,14 @@ void checkSchedule()
   for (uint8_t pumpIdx = 0; pumpIdx < NUM_PUMPS; pumpIdx++)
   {
     Pump *pump = &pumps[pumpIdx];
-    if (!isPumping(pumpIdx) && pump->isTimeToRun(millis(), sensorData, pumpIdx))
+    if (!pump->isRunning() && pump->isTimeToRun(millis(), sensorData, pumpIdx))
     {
       startPump(pumpIdx);
     }
-    else if (isPumping(pumpIdx))
+    else if (pump->isRunning())
     {
       uint32_t pumpMs = (uint32_t)pump->getConfig().secondsPump * 1000ul;
-      if ((uint32_t)(millis() - pumpStartedMs[pumpIdx]) >= pumpMs)
+      if ((uint32_t)(millis() - pump->getStartedAtMs()) >= pumpMs)
       {
         stopPump(pumpIdx);
       }
@@ -611,34 +606,20 @@ void runPumps()
 {
   for (uint8_t pumpIdx = 0; pumpIdx < NUM_PUMPS; pumpIdx++)
   {
-    uint8_t pumpPin = pumpsPins[pumpIdx];
-    if (isPumping(pumpIdx))
+    Pump *pump = &pumps[pumpIdx];
+    if (pump->isRunning())
     {
-      Pump *pump = &pumps[pumpIdx];
-      analogWrite(pumpPin, (255 * pump->getConfig().power) / 100);
-      // digitalWrite(pumpPin, HIGH);
+      analogWrite(pump->getPin(), (255 * pump->getConfig().power) / 100);
     }
     else
     {
-      analogWrite(pumpPin, 0);
-      // digitalWrite(pumpPin, LOW);
+      analogWrite(pump->getPin(), 0);
     }
   }
 }
 
-int freeRam()
-{
-  extern int __heap_start, *__brkval;
-  int v;
-  return (int)&v - (__brkval == 0 ? (int)&__heap_start : (int)__brkval);
-}
-
 void setup()
 {
-
-#ifdef EEPROM_EX
-  wdt_enable(WDTO_1S);
-#endif
 
   // Init the display
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
@@ -659,14 +640,10 @@ void setup()
   pinMode(BTN_2, INPUT_PULLUP);
   pinMode(BTN_3, INPUT_PULLUP);
 
-  for (uint8_t i = 0; i < NUM_PUMPS; i++)
+  for (uint8_t idx = 0; idx < NUM_PUMPS; idx++)
   {
-    pinMode(pumpsPins[i], OUTPUT);
-  }
-
-  for (uint8_t i = 0; i < NUM_PUMPS; i++)
-  {
-    pinMode(soilSensorsPins[i], INPUT);
+    pinMode(pumps[idx].getPin(), OUTPUT);
+    pinMode(soilSensorsPins[idx], INPUT);
   }
 
   cli();
@@ -697,7 +674,7 @@ void loop()
   wdt_reset();
 
   // Enter sleep mode after SLEEP_TIME and if no pump is active
-  isSleeping = (lastDebounceTimeMs + SLEEP_TIME < currentMillis) && (pumpsActive == 0);
+  isSleeping = (lastDebounceTimeMs + SLEEP_TIME < currentMillis) && (!anyPumpIsRunning());
 
   if (!isSleeping)
   {
